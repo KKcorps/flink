@@ -22,13 +22,15 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-Temporal Tables represent a concept of a (parameterized) view on a changing table that returns the content of a table at a specific point in time.
+Tables in Flink are continuously changing with time. The data can either be appended or updated in the existing table. Temporal Tables allow users to query the data at a specific point in time. These can be thought of as Snapshot of the table at a particular point in time. Currently only processing time is supported as the time parameter for these tables.
 
-The changing table can either be a changing history table which tracks the changes (e.g. database changelogs) or a changing dimension table which materializes the changes (e.g. database tables).
+The changes in temporal tables can be of two types - 
 
-For the changing history table, Flink can keep track of the changes and allows for accessing the content of the table at a certain point in time within a query. In Flink, this kind of table is represented by a *Temporal Table Function*.
+- Change in history - In this case only the data is changed in the table. No new values are added for the dimensions of the table. This can be queried with just a Temporal Table Function.
 
-For the changing dimension table, Flink allows for accessing the content of the table at processing time within a query. In Flink, this kind of table is represented by a *Temporal Table*.
+- Change in dimensions - In this case, new values for a dimension column are added in the table. In Flink, this kind of table is represented by a *Temporal Table*
+
+Note that it is possible to query the snapshot without temporal tables as well. *Temporal Tables* just aims to simplify such queries, speed up their execution, and reduce Flink's state usage
 
 * This will be replaced by the TOC
 {:toc}
@@ -80,7 +82,7 @@ rowtime currency   rate
 10:45   Euro        116
 {% endhighlight %}
 
-The concept of *Temporal Tables* aims to simplify such queries, speed up their execution, and reduce Flink's state usage. A *Temporal Table* is a parameterized view on an append-only table that interprets the rows of the append-only table as the changelog of a table and provides the version of that table at a specific point in time. Interpreting the append-only table as a changelog requires the specification of a primary key attribute and a timestamp attribute. The primary key determines which rows are overwritten and the timestamp determines the time during which a row is valid.
+For temporal tables, the append-only tables need to be converted to a changelog. Interpreting this as a changelog requires the specification of a primary key attribute and a timestamp attribute. The primary key determines which rows are overwritten and the timestamp determines the time during which a row is valid.
 
 In the above example `currency` would be a primary key for `RatesHistory` table and `rowtime` would be the timestamp attribute.
 

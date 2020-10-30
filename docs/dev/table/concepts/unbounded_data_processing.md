@@ -1,7 +1,7 @@
 ---
-title: "Joins in Continuous Queries"
-nav-parent_id: streaming_tableapi
-nav-pos: 3
+title: "Unbounded Data Processing"
+nav-parent_id: tableapi
+nav-pos: 0
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -22,17 +22,128 @@ specific language governing permissions and limitations
 under the License.
 -->
 
+In Traditional SQL systems, users deal with bounded data all the times. Flink Tables, however, can contain unbounded data backed by a streaming data source such as Apache Kafka. The data keeps on getting populated in real time. The user then has to take care of this fundamental difference while writing queries. Let's go through some scenarios in which unbounded data can cause issues - 
+
+- Getting count of rows in Table. Since the table is getting populated in real time, the number of rows also keep on increasing. Secondly, there is not a defined starting point in the table from which you can start counting rows. 
+
+- Group By operations become non-trivial. The problems are similar to the ones described in the previous point.
+
+- Joining two tables. Join is a trivial operation for bounded data source. But for unbounded data, it is fairly non-trivial. e.g. Let us assume we have to joing two tables which contain key and value. KeyA, ValueA arrives at time t1 in table A. KeyA, ValueB arrives at time t2 in table B. Following scenarios can occur -
+
+a. t1 < t2 - Here KeyA, ValueA will need to be stored in some intermediate state such as heap or rocksDB so that it can be joined by t2
+b. t2 < t1 - Here KeyA, ValueB will need to be stored in some intermediate state such as heap or rocksDB so that it can be joined by t1
+
+The issue is we don't know the time difference abs(t2 - t1) i.e. after how long will we receive the value for same key from the joined stream. What if the KeyA never arrives in TableB. Will you keep on holding the KeyA in intermediate state? If you want to set a TTL, what should be correct value?
+
+Unbounded streaming data is represented as *Dynamic Tables* in Flink. 
+
+Dynamic Tables
+----------------
+
+*Dynamic tables* are the core concept of Flink's Table API and SQL support for streaming data. In contrast to the static tables that represent batch data, dynamic tables are changing over time although they can be queried just like batch tables. 
+
+Dynamic tables can be thought of as similar although not exactly same to Materialized views in most of the databases. In contrast to a virtual view, a materialized view caches the result of the query such that the query does not need to be evaluated when the view is accessed. A common challenge for caching is to prevent a cache from serving outdated results. A materialized view becomes outdated when the base tables of its definition query are modified. There are multiple techniques to update the view. *Eager View Maintenance* is one such technique which updates a materialized view as soon as its base tables are updated.
+
+Querying dynamic tables yields a *Continuous Query*. A continuous query never terminates and keep on updating its (dynamic) result table to reflect the changes on its (dynamic) input tables. It is important to note that the result of a continuous query is always semantically equivalent to the result of the same query being executed in batch mode on a snapshot of the input tables.
+
+The following figure visualizes the relationship of streams, dynamic tables, and  continuous queries:
+
+<center>
+<img alt="Dynamic tables" src="{{ site.baseurl }}/fig/table-streaming/stream-query-stream.png" width="80%">
+</center>
+
+1. A stream is converted into a dynamic table.
+1. A continuous query is evaluated on the dynamic table yielding a new dynamic table.
+1. The resulting dynamic table is converted back into a stream.
+
+**Note:** Dynamic tables are foremost a logical concept. Dynamic tables are not necessarily (fully) materialized during query execution.
+
+In the following, we will explain the concepts of dynamic tables and continuous queries with a stream of click events that have the following schema:
+
+{% highlight plain %}
+[
+  user:  VARCHAR,   // the name of the user
+  cTime: TIMESTAMP, // the time when the URL was accessed
+  url:   VARCHAR    // the URL that was accessed by the user
+]
+{% endhighlight %}
+
+In order to process a stream with a relational query, it has to be converted into a `Table`. Conceptually, each record of the stream is interpreted as an `INSERT` modification on the resulting table. Essentially, we are building a table from an `INSERT`-only changelog stream.
+
+The following figure visualizes how the stream of click event (left-hand side) is converted into a table (right-hand side). The resulting table is continuously growing as more records of the click stream are inserted.
+
+<center>
+<img alt="Append mode" src="{{ site.baseurl }}/fig/table-streaming/append-mode.png" width="60%">
+</center>
+
+**Note:** A table which is defined on a stream is internally not materialized.
+
+### Continuous Queries
+
+A continuous query is evaluated on a dynamic table and produces a new dynamic table as result. In contrast to a batch query, a continuous query never terminates and updates its result table according to the updates on its input tables. At any point in time, the result of a continuous query is semantically equivalent to the result of the same query being executed in batch mode on a snapshot of the input tables.
+
+Let's try to understand it with two example queries on a `clicks` table that is defined on the stream of click events.
+
+The first query is a simple `GROUP-BY COUNT` aggregation query. It groups the `clicks` table on the `user` field and counts the number of visited URLs. The following figure shows how the query is evaluated over time as the `clicks` table is updated with additional rows.
+
+<center>
+<img alt="Continuous Non-Windowed Query" src="{{ site.baseurl }}/fig/table-streaming/query-groupBy-cnt.png" width="90%">
+</center>
+
+When the query is started, the `clicks` table (left-hand side) is empty. The query starts to compute the result table, when the first row is inserted into the `clicks` table. After the first row `[Mary, ./home]` was inserted, the result table (right-hand side, top) consists of a single row `[Mary, 1]`. When the second row `[Bob, ./cart]` is inserted into the `clicks` table, the query updates the result table and inserts a new row `[Bob, 1]`. The third row `[Mary, ./prod?id=1]` yields an update of an already computed result row such that `[Mary, 1]` is updated to `[Mary, 2]`. Finally, the query inserts a third row `[Liz, 1]` into the result table, when the fourth row is appended to the `clicks` table.
+
+The second query is similar to the first one but groups the `clicks` table in addition to the `user` attribute also on an [hourly tumbling window]({{ site.baseurl }}/dev/table/sql/queries.html#group-windows) before it counts the number of URLs (time-based computations such as windows are based on special [time attributes](time_attributes.html), which are discussed later.). Again, the figure shows the input and output at different points in time to visualize the changing nature of dynamic tables.
+
+<center>
+<img alt="Continuous Group-Window Query" src="{{ site.baseurl }}/fig/table-streaming/query-groupBy-window-cnt.png" width="100%">
+</center>
+
+As before, the input table `clicks` is shown on the left. The query continuously computes results every hour and updates the result table. The clicks table contains four rows with timestamps (`cTime`) between `12:00:00` and `12:59:59`. The query computes two results rows from this input (one for each `user`) and appends them to the result table. For the next window between `13:00:00` and `13:59:59`, the `clicks` table contains three rows, which results in another two rows being appended to the result table. The result table is updated, as more rows are appended to `clicks` over time.
+
+Let's take a look at how both of these queries differ when the table needs to be converted to a Datastream.
+
+### Update and Append Queries
+
+Although the two example queries appear to be quite similar (both compute a grouped count aggregate), they differ in one important aspect:
+- The first query updates previously emitted results, i.e., the changelog stream that defines the result table contains `INSERT` and `UPDATE` changes.
+  Such queries need to maintain more state when converted to Datastreams.
+    
+- The second query only appends to the result table, i.e., the changelog stream of the result table only consists of `INSERT` changes.
+
+When converting a dynamic table into a stream or writing it to an external system, the changes in the data need to be encoded. Flink's Table API and SQL support three ways to encode the changes of a dynamic table:
+
+* **Append-only stream:** A dynamic table that is only modified by `INSERT` changes can be  converted into a stream by emitting the inserted rows.
+
+* **Retract stream:** A retract stream is a stream with two types of messages, *add messages* and *retract messages*. A dynamic table is converted into an retract stream by encoding an `INSERT` change as add message, a `DELETE` change as retract message, and an `UPDATE` change as a retract message for the updated (previous) row and an add message for the updating (new) row. The following figure visualizes the conversion of a dynamic table into a retract stream.
+
+<center>
+<img alt="Dynamic tables" src="{{ site.baseurl }}/fig/table-streaming/undo-redo-mode.png" width="85%">
+</center>
+<br><br>
+
+* **Upsert stream:** An upsert stream is a stream with two types of messages, *upsert messages* and *delete messages*. A dynamic table that is converted into an upsert stream requires a (possibly composite) unique key. The table is converted into a stream by encoding `INSERT` and `UPDATE` changes as upsert messages and `DELETE` changes as delete messages. The stream consuming operator needs to be aware of the unique key attribute in order to apply messages correctly. 
+
+   The primary difference to a retract stream is that `UPDATE` changes are encoded with a single message and hence more efficient. The following figure visualizes the conversion of a dynamic table into an upsert stream.
+
+<center>
+<img alt="Dynamic tables" src="{{ site.baseurl }}/fig/table-streaming/redo-mode.png" width="85%">
+</center>
+<br><br>
+
+The API to convert a dynamic table into a `DataStream` is discussed on the [Common Concepts]({{ site.baseurl }}/dev/table/common.html#convert-a-table-into-a-datastream) page. Please note that only append and retract streams are supported when converting a dynamic table into a `DataStream`. The `TableSink` interface to emit a dynamic table to an external system are discussed on the [TableSources and TableSinks](../sourceSinks.html#define-a-tablesink) page.
+
+{% top %} 
+
+Joins in Continuous Queries
+----------------------------
+
 Joins are a common and well-understood operation in batch data processing to connect the rows of two relations. However, the semantics of joins on [dynamic tables](dynamic_tables.html) are much less obvious or even confusing.
 
 Because of that, there are a couple of ways to actually perform a join using either Table API or SQL.
 
 For more information regarding the syntax, please check the join sections in [Table API](../tableApi.html#joins) and [SQL]({{ site.baseurl }}/dev/table/sql/queries.html#joins).
 
-* This will be replaced by the TOC
-{:toc}
-
-Regular Joins
--------------
+### Regular Joins
 
 Regular joins are the most generic type of join in which any new records or changes to either side of the join input are visible and are affecting the whole join result.
 For example, if there is a new record on the left side, it will be joined with all of the previous and future records on the right side.
@@ -46,10 +157,9 @@ ON Orders.productId = Product.id
 These semantics allow for any kind of updating (insert, update, delete) input tables.
 
 However, this operation has an important implication: it requires to keep both sides of the join input in Flink's state forever.
-Thus, the resource usage will grow indefinitely as well, if one or both input tables are continuously growing.
+Thus, the resource usage will grow indefinitely as well, if one or both input tables are continuously growing. This is because data for a key can arrive at any point in time in future or may never even arrive.
 
-Interval Joins
--------------------
+### Interval Joins
 
 A interval join is defined by a join predicate, that checks if the [time attributes](time_attributes.html) of the input
 records are within certain time constraints, i.e., a time window.
@@ -65,8 +175,7 @@ WHERE o.id = s.orderId AND
 
 Compared to a regular join operation, this kind of join only supports append-only tables with time attributes. Since time attributes are quasi-monotonic increasing, Flink can remove old values from its state without affecting the correctness of the result.
 
-Join with a Temporal Table Function
---------------------------
+### Join with a Temporal Table Function
 
 A join with a temporal table function joins an append-only table (left input/probe side) with a temporal table (right input/build side),
 i.e., a table that changes over time and tracks its changes. Please check the corresponding page for more information about [temporal tables](temporal_tables.html).
@@ -222,8 +331,7 @@ By definition of event time, [watermarks]({{ site.baseurl }}/dev/event_time.html
 forward in time and discard versions of the build table that are no longer necessary because no incoming row with
 lower or equal timestamp is expected.
 
-Join with a Temporal Table
---------------------------
+### Join with a Temporal Table
 
 A join with a temporal table joins an arbitrary table (left input/probe side) with a temporal table (right input/build side),
 i.e., an external dimension table that changes over time. Please check the corresponding page for more information about [temporal tables](temporal_tables.html#temporal-table).
@@ -350,5 +458,3 @@ FROM
 <span class="label label-danger">Attention</span> It is only supported in SQL, and not supported in Table API yet.
 
 <span class="label label-danger">Attention</span> Flink does not support event time temporal table joins currently.
-
-{% top %}
