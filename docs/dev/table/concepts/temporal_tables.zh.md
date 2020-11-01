@@ -1,6 +1,6 @@
 ---
 title: "时态表（Temporal Tables）"
-nav-parent_id: streaming_tableapi
+nav-parent_id: table-api-concepts
 nav-pos: 4
 ---
 <!--

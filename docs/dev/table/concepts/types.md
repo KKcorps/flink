@@ -1,6 +1,6 @@
 ---
 title: "Data Types"
-nav-parent_id: tableapi
+nav-parent_id: table-api-concepts
 nav-pos: 20
 ---
 <!--

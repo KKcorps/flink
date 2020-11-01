@@ -1,6 +1,6 @@
 ---
 title: "Query Configuration"
-nav-parent_id: streaming_tableapi
+nav-parent_id: table-api-concepts
 nav-pos: 6
 ---
 <!--

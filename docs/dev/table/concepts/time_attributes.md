@@ -1,6 +1,6 @@
 ---
 title: "Time Attributes"
-nav-parent_id: streaming_tableapi
+nav-parent_id: table-api-concepts
 nav-pos: 2
 ---
 <!--
@@ -36,7 +36,7 @@ This page explains how time attributes can be defined for time-based operations 
 {:toc}
 
 Introduction to Time Attributes
--------------------------------
+--------------------------------
 
 Time-based operations such as windows in both the [Table API]({{ site.baseurl }}/dev/table/tableApi.html#group-windows) and [SQL]({{ site.baseurl }}/dev/table/sql/queries.html#group-windows) require information about the notion of time and its origin. Therefore, tables can offer *logical time attributes* for indicating time and accessing corresponding timestamps in table programs.
 

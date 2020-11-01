@@ -1,6 +1,6 @@
 ---
 title: "Temporal Tables"
-nav-parent_id: streaming_tableapi
+nav-parent_id: table-api-concepts
 nav-pos: 4
 ---
 <!--
@@ -224,7 +224,8 @@ which allows us to use the function `rates` in the [Table API](../tableApi.html#
 Line `(2)` registers this function under the name `Rates` in our table environment,
 which allows us to use the `Rates` function in [SQL]({{ site.baseurl }}/dev/table/sql/queries.html#joins).
 
-## Temporal Table
+Temporal Table
+----------------
 
 <span class="label label-danger">Attention</span> This is only supported in Blink planner.
 

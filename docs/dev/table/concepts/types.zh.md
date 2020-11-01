@@ -1,6 +1,6 @@
 ---
 title: "数据类型"
-nav-parent_id: tableapi
+nav-parent_id: table-api-concepts
 nav-pos: 20
 ---
 <!--
